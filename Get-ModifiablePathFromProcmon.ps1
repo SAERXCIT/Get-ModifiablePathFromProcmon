@@ -55,21 +55,36 @@ function Get-ModifiablePathFromProcmon {
     )
 
     BEGIN {
-        if (-not (Get-Command 'Get-ModifiablePath' -errorAction SilentlyContinue) -or -not (Get-Command 'Get-ModifiableRegistryPath' -errorAction SilentlyContinue)) {
-            Write-Error "PrivescCheck functions not found. Please import Get-ModifiablePath and Get-ModifiableRegistryPath from PrivescCheck (https://github.com/itm4n/PrivescCheck)"
+        if (-not (Get-Command 'Get-ModifiablePath' -errorAction SilentlyContinue) -or -not (Get-Command 'Get-ObjectAccessRight' -errorAction SilentlyContinue)) {
+            Write-Error "PrivescCheck functions not found. Please import Get-ModifiablePath and Get-ObjectAccessRight from PrivescCheck (https://github.com/itm4n/PrivescCheck)"
             break
         }
+        $ModifiableFSPaths = @()
+        $ModifiableRegPaths = @()
     }
 
     PROCESS {
         $CSVData = Import-Csv $CSVPath
-        $ModifiableFSPaths = $CSVData | Where-Object { $_.Operation -eq "CreateFile" -and ((-not $IgnoreImpersonate) -or (-not $_.Detail.Contains("Impersonating:"))) } | Select-Object -Property Path -Unique | ForEach-Object {
-            $_ | Get-ModifiablePath
+
+        $CSVData | Where-Object { $_.Operation -eq "CreateFile" -and ((-not $IgnoreImpersonate) -or (-not $_.Detail.Contains("Impersonating:"))) } | Select-Object -Property Path -Unique | ForEach-Object {
+            $CurrentPath = $_.Path
+            Get-ModifiablePath -Path $CurrentPath | Foreach-Object {
+                $Output = $_
+                $Output | Add-Member -MemberType "NoteProperty" -Name "ProcmonPath" -Value $CurrentPath.Path
+                $ModifiableFSPaths += $Output
+            }
         }
-        $ModifiableRegPaths = $CSVData | Where-Object { $_.Operation -eq "RegOpenKey" -and ((-not $IgnoreImpersonate) -or (-not $_.Detail.Contains("Impersonating:"))) } | Select-Object -Property Path -Unique | ForEach-Object {
-            "Registry::$($_.Path)" | Get-ModifiableRegistryPath
+
+        $CSVData | Where-Object { $_.Operation -eq "RegOpenKey" -and ((-not $IgnoreImpersonate) -or (-not $_.Detail.Contains("Impersonating:"))) } | Select-Object -Property Path -Unique | ForEach-Object {
+            $CurrentPath = $_.Path
+            Get-ObjectAccessRight -Type RegistryKey -Name $CurrentPath | Foreach-Object {
+                $Output = $_
+                $Output | Add-Member -MemberType "NoteProperty" -Name "ProcmonPath" -Value $CurrentPath.Path
+                $ModifiableRegPaths += $Output
+            }
         }
     }
+
 
     END {
         Write-Host "Modifiable filesystem paths"
